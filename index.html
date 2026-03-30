@@ -477,11 +477,32 @@ const CH_COLORS=['#2563eb','#16a34a','#ea6c0a','#dc2626','#7c3aed','#b45309','#0
 let charts={}, curRec=null, curDate=null, curMV={y:0,m:0}, yrVal=new Date().getFullYear(), mTab='upload';
 let _cache=null;
 
-// ── Google Sheets Storage ──
+// ── Google Sheets Storage (JSONP 방식으로 CORS 우회) ──
 function _sj(v){if(!v||v==='')return{};try{return typeof v==='object'?v:JSON.parse(v);}catch{return{};}}
 function _inv(){_cache=null;}
 function _loading(on){let el=document.getElementById('_gl');if(!el){el=document.createElement('div');el.id='_gl';el.style.cssText='position:fixed;top:12px;right:16px;background:#2563eb;color:#fff;font-size:11px;padding:4px 12px;border-radius:20px;z-index:9999;display:none;';el.textContent='⏳ 동기화 중...';document.body.appendChild(el);}el.style.display=on?'block':'none';}
-async function _gasPost(p){_loading(true);try{await fetch(GAS_URL,{method:'POST',body:JSON.stringify(p)});}catch(e){console.error(e);}finally{_inv();_loading(false);}}
+
+// GET: JSONP로 CORS 우회
+function _gasGet(){
+  return new Promise((resolve,reject)=>{
+    const cb='_gcb'+Date.now();
+    const script=document.createElement('script');
+    const timer=setTimeout(()=>{delete window[cb];script.remove();reject(new Error('timeout'));},10000);
+    window[cb]=function(data){clearTimeout(timer);delete window[cb];script.remove();resolve(data);};
+    script.src=GAS_URL+'?callback='+cb+'&t='+Date.now();
+    script.onerror=()=>{clearTimeout(timer);delete window[cb];script.remove();reject(new Error('script error'));};
+    document.head.appendChild(script);
+  });
+}
+
+// POST: no-cors로 fire-and-forget (저장은 되지만 응답 못 읽음 — 정상)
+async function _gasPost(p){
+  _loading(true);
+  try{
+    await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(p)});
+  }catch(e){console.error('POST error',e);}
+  finally{_inv();_loading(false);}
+}
 
 const KR_HOLIDAYS = {
   '2025-01-01':'신정','2025-01-28':'설날 연휴','2025-01-29':'설날','2025-01-30':'설날 연휴',
@@ -947,8 +968,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
 (async function(){
   _loading(true);
   try{
-    const res=await fetch(GAS_URL);
-    const raw=await res.json();
+    const raw=await _gasGet();
     _cache=(raw||[]).map(r=>({...r,coupangTotal:Number(r.coupangTotal||0),multiTotal:Number(r.multiTotal||0),multiCount:Number(r.multiCount||0),total:Number(r.total||0),members:(r.members!==''&&r.members!=null)?Number(r.members):null,kakao:(r.kakao!==''&&r.kakao!=null)?Number(r.kakao):null,interest:(r.interest!==''&&r.interest!=null)?Number(r.interest):null,coupangProducts:_sj(r.coupangProducts),byChannel:_sj(r.byChannel)}));
   }catch(e){console.error('GAS load error',e);_cache=[];}
   _loading(false);
